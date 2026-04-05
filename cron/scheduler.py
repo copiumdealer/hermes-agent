@@ -447,10 +447,10 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         )
         
         # Run the agent with a timeout so a hung API call or tool doesn't
-        # block the cron ticker thread indefinitely.  Default 2 hours;
+        # block the cron ticker thread indefinitely.  Default 30 minutes;
         # override via env var.  Uses a separate thread because
         # run_conversation is synchronous.
-        _cron_timeout = float(os.getenv("HERMES_CRON_TIMEOUT", 7200))
+        _cron_timeout = float(os.getenv("HERMES_CRON_TIMEOUT", 1800))
         _cron_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         _cron_future = _cron_pool.submit(agent.run_conversation, prompt)
         try:
