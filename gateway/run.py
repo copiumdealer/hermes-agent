@@ -1746,7 +1746,7 @@ class GatewayRunner:
         # Staleness eviction: if an entry has been in _running_agents for
         # longer than the agent timeout, it's a leaked lock from a hung or
         # crashed handler.  Evict it so the session isn't permanently stuck.
-        _STALE_TTL = float(os.getenv("HERMES_AGENT_TIMEOUT", 600)) + 60  # timeout + 1 min grace
+        _STALE_TTL = float(os.getenv("HERMES_AGENT_TIMEOUT", 1800)) + 60  # timeout + 1 min grace
         _stale_ts = self._running_agents_ts.get(_quick_key, 0)
         if _quick_key in self._running_agents and _stale_ts and (time.time() - _stale_ts) > _STALE_TTL:
             logger.warning(
@@ -6098,8 +6098,8 @@ class GatewayRunner:
         try:
             # Run in thread pool to not block.  Cap total execution time
             # so a hung API call or runaway tool doesn't permanently lock
-            # the session.  Default 10 minutes; override with env var.
-            _agent_timeout = float(os.getenv("HERMES_AGENT_TIMEOUT", 600))
+            # the session.  Default 30 minutes; override with env var.
+            _agent_timeout = float(os.getenv("HERMES_AGENT_TIMEOUT", 1800))
             loop = asyncio.get_event_loop()
             try:
                 response = await asyncio.wait_for(
