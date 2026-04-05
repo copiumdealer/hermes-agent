@@ -2129,6 +2129,7 @@ class HermesCLI:
                 "command": self.acp_command,
                 "args": list(self.acp_args or []),
                 "credential_pool": getattr(self, "_credential_pool", None),
+                "reasoning_config": getattr(self, "reasoning_config", None),
             },
         )
 
@@ -5923,6 +5924,7 @@ class HermesCLI:
             route_label=turn_route["label"],
         ):
             return None
+        self.agent.reasoning_config = turn_route.get("reasoning_config", self.reasoning_config)
         
         # Pre-process images through the vision tool (Gemini Flash) so the
         # main model receives text descriptions instead of raw base64 image
@@ -8073,6 +8075,7 @@ def main(
                     route_label=turn_route["label"],
                 ):
                     cli.agent.quiet_mode = True
+                    cli.agent.reasoning_config = turn_route.get("reasoning_config", cli.reasoning_config)
                     result = cli.agent.run_conversation(
                         user_message=query,
                         conversation_history=cli.conversation_history,

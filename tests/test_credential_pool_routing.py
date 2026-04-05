@@ -73,6 +73,38 @@ class TestSmartRoutingPoolPreservation:
         result = resolve_turn_route("hello", {"enabled": False}, primary)
         assert result["runtime"]["credential_pool"] is fake_pool
 
+    def test_same_provider_cheap_route_preserves_pool(self, monkeypatch):
+        from agent.smart_model_routing import resolve_turn_route
+
+        monkeypatch.setattr(
+            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            MagicMock(side_effect=AssertionError("same-provider route should reuse primary runtime")),
+        )
+
+        fake_pool = MagicMock(name="CredentialPool")
+        primary = {
+            "model": "gpt-5.4",
+            "api_key": "***",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "provider": "openai-codex",
+            "api_mode": "codex_responses",
+            "command": None,
+            "args": [],
+            "credential_pool": fake_pool,
+            "reasoning_config": {"enabled": True, "effort": "xhigh"},
+        }
+        routing_config = {
+            "enabled": True,
+            "cheap_model": {
+                "provider": "openai-codex",
+                "model": "gpt-5.4-mini",
+                "reasoning_effort": "xhigh",
+            },
+        }
+        result = resolve_turn_route("thanks", routing_config, primary)
+        assert result["model"] == "gpt-5.4-mini"
+        assert result["runtime"]["credential_pool"] is fake_pool
+
     def test_route_fallback_on_resolve_error_preserves_pool(self, monkeypatch):
         """When smart routing picks a cheap model but resolve_runtime_provider
         fails, the fallback to primary must still include credential_pool."""

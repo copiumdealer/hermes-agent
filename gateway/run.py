@@ -769,6 +769,7 @@ class GatewayRunner:
             "command": runtime_kwargs.get("command"),
             "args": list(runtime_kwargs.get("args") or []),
             "credential_pool": runtime_kwargs.get("credential_pool"),
+            "reasoning_config": getattr(self, "_reasoning_config", None),
         }
         return resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)
 
@@ -3977,9 +3978,11 @@ class GatewayRunner:
 
             pr = self._provider_routing
             max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
-            reasoning_config = self._load_reasoning_config()
-            self._reasoning_config = reasoning_config
+            default_reasoning_config = self._load_reasoning_config()
+            self._reasoning_config = default_reasoning_config
+            self._smart_model_routing = self._load_smart_model_routing()
             turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
+            reasoning_config = turn_route.get("reasoning_config", default_reasoning_config)
 
             def run_sync():
                 agent = AIAgent(
@@ -4138,7 +4141,10 @@ class GatewayRunner:
             model = _resolve_gateway_model(user_config)
             platform_key = _platform_config_key(source.platform)
             reasoning_config = self._load_reasoning_config()
+            self._reasoning_config = reasoning_config
+            self._smart_model_routing = self._load_smart_model_routing()
             turn_route = self._resolve_turn_agent_config(question, model, runtime_kwargs)
+            reasoning_config = turn_route.get("reasoning_config", reasoning_config)
             pr = self._provider_routing
 
             # Snapshot history from running agent or stored transcript
@@ -5656,6 +5662,7 @@ class GatewayRunner:
                 pass
 
             model = _resolve_gateway_model(user_config)
+            self._smart_model_routing = self._load_smart_model_routing()
 
             try:
                 runtime_kwargs = _resolve_runtime_agent_kwargs()
@@ -5700,6 +5707,7 @@ class GatewayRunner:
                     logger.debug("Could not set up stream consumer: %s", _sc_err)
 
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
+            reasoning_config = turn_route.get("reasoning_config", reasoning_config)
 
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
