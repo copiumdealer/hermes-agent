@@ -27,7 +27,6 @@ sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 
 from gateway.config import Platform, PlatformConfig
 from gateway.session import SessionSource, build_session_key
-from hermes_cli.config import get_hermes_home
 from hermes_constants import get_hermes_dir
 
 
@@ -569,6 +568,16 @@ class BasePlatformAdapter(ABC):
         """
         self._message_handler = handler
     
+    def set_session_store(self, session_store: Any) -> None:
+        """
+        Set the session store for checking active sessions.
+        
+        Used by adapters that need to check if a thread/conversation
+        has an active session before processing messages (e.g., Slack
+        thread replies without explicit mentions).
+        """
+        self._session_store = session_store
+    
     @abstractmethod
     async def connect(self) -> bool:
         """
@@ -1093,16 +1102,20 @@ class BasePlatformAdapter(ABC):
         
         # Check if there's already an active handler for this session
         if session_key in self._active_sessions:
-            # /approve and /deny must bypass the active-session guard.
-            # The agent thread is blocked on threading.Event.wait() inside
-            # tools/approval.py — queuing these commands creates a deadlock:
-            # the agent waits for approval, approval waits for agent to finish.
-            # Dispatch directly to the message handler without touching session
-            # lifecycle (no competing background task, no session guard removal).
+            # Certain commands must bypass the active-session guard and be
+            # dispatched directly to the gateway runner.  Without this, they
+            # are queued as pending messages and either:
+            #   - leak into the conversation as user text (/stop, /new), or
+            #   - deadlock (/approve, /deny — agent is blocked on Event.wait)
+            #
+            # Dispatch inline: call the message handler directly and send the
+            # response.  Do NOT use _process_message_background — it manages
+            # session lifecycle and its cleanup races with the running task
+            # (see PR #4926).
             cmd = event.get_command()
-            if cmd in ("approve", "deny"):
+            if cmd in ("approve", "deny", "status", "stop", "new", "reset"):
                 logger.debug(
-                    "[%s] Approval command '/%s' bypassing active-session guard for %s",
+                    "[%s] Command '/%s' bypassing active-session guard for %s",
                     self.name, cmd, session_key,
                 )
                 try:
@@ -1116,29 +1129,7 @@ class BasePlatformAdapter(ABC):
                             metadata=_thread_meta,
                         )
                 except Exception as e:
-                    logger.error("[%s] Approval dispatch failed: %s", self.name, e, exc_info=True)
-                return
-
-            # /status must also bypass the active-session guard so it always
-            # returns a system-generated response instead of being queued as
-            # user text and passed to the agent (#5046).
-            if cmd == "status":
-                logger.debug(
-                    "[%s] Status command bypassing active-session guard for %s",
-                    self.name, session_key,
-                )
-                try:
-                    _thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else None
-                    response = await self._message_handler(event)
-                    if response:
-                        await self._send_with_retry(
-                            chat_id=event.source.chat_id,
-                            content=response,
-                            reply_to=event.message_id,
-                            metadata=_thread_meta,
-                        )
-                except Exception as e:
-                    logger.error("[%s] Status dispatch failed: %s", self.name, e, exc_info=True)
+                    logger.error("[%s] Command '/%s' dispatch failed: %s", self.name, cmd, e, exc_info=True)
                 return
 
             # Special case: photo bursts/albums frequently arrive as multiple near-

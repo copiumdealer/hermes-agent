@@ -21,7 +21,6 @@ from typing import Optional, Dict, Any
 
 from hermes_cli.nous_subscription import (
     apply_nous_provider_defaults,
-    get_nous_subscription_explainer_lines,
     get_nous_subscription_features,
 )
 from tools.tool_backend_helpers import managed_nous_tools_enabled
@@ -660,14 +659,14 @@ def _print_setup_summary(config: dict, hermes_home):
     # Browser tools (local Chromium, Camofox, Browserbase, Browser Use, or Firecrawl)
     browser_provider = subscription_features.browser.current_provider
     if subscription_features.browser.managed_by_nous:
-        tool_status.append(("Browser Automation (Nous Browserbase)", True, None))
+        tool_status.append(("Browser Automation (Nous Browser Use)", True, None))
     elif subscription_features.browser.available:
         label = "Browser Automation"
         if browser_provider:
             label = f"Browser Automation ({browser_provider})"
         tool_status.append((label, True, None))
     else:
-        missing_browser_hint = "npm install -g agent-browser, set CAMOFOX_URL, or configure Browserbase"
+        missing_browser_hint = "npm install -g agent-browser, set CAMOFOX_URL, or configure Browser Use or Browserbase"
         if browser_provider == "Browserbase":
             missing_browser_hint = (
                 "npm install -g agent-browser and set "
@@ -1347,8 +1346,6 @@ def setup_terminal_backend(config: dict):
     keep_current_idx = next_idx
     terminal_choices.append(f"Keep current ({current_backend})")
     idx_to_backend[keep_current_idx] = current_backend
-
-    default_terminal = backend_to_idx.get(current_backend, 0)
 
     terminal_idx = prompt_choice(
         "Select terminal backend:", terminal_choices, keep_current_idx
