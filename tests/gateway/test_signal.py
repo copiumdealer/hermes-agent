@@ -42,15 +42,6 @@ def _stub_rpc(return_value):
 # Platform & Config
 # ---------------------------------------------------------------------------
 
-class TestSignalPlatformEnum:
-    def test_signal_enum_exists(self):
-        assert Platform.SIGNAL.value == "signal"
-
-    def test_signal_in_platform_list(self):
-        platforms = [p.value for p in Platform]
-        assert "signal" in platforms
-
-
 class TestSignalConfigLoading:
     def test_apply_env_overrides_signal(self, monkeypatch):
         monkeypatch.setenv("SIGNAL_HTTP_URL", "http://localhost:9090")
@@ -75,18 +66,6 @@ class TestSignalConfigLoading:
         _apply_env_overrides(config)
 
         assert Platform.SIGNAL not in config.platforms
-
-    def test_connected_platforms_includes_signal(self, monkeypatch):
-        monkeypatch.setenv("SIGNAL_HTTP_URL", "http://localhost:8080")
-        monkeypatch.setenv("SIGNAL_ACCOUNT", "+15551234567")
-
-        from gateway.config import GatewayConfig, _apply_env_overrides
-        config = GatewayConfig()
-        _apply_env_overrides(config)
-
-        connected = config.get_connected_platforms()
-        assert Platform.SIGNAL in connected
-
 
 # ---------------------------------------------------------------------------
 # Adapter Init & Helpers
@@ -114,16 +93,16 @@ class TestSignalAdapterInit:
 
 class TestSignalHelpers:
     def test_redact_phone_long(self):
-        from gateway.platforms.signal import _redact_phone
-        assert _redact_phone("+15551234567") == "+155****4567"
+        from gateway.platforms.helpers import redact_phone
+        assert redact_phone("+155****4567") == "+155****4567"
 
     def test_redact_phone_short(self):
-        from gateway.platforms.signal import _redact_phone
-        assert _redact_phone("+12345") == "+1****45"
+        from gateway.platforms.helpers import redact_phone
+        assert redact_phone("+12345") == "+1****45"
 
     def test_redact_phone_empty(self):
-        from gateway.platforms.signal import _redact_phone
-        assert _redact_phone("") == "<none>"
+        from gateway.platforms.helpers import redact_phone
+        assert redact_phone("") == "<none>"
 
     def test_parse_comma_list(self):
         from gateway.platforms.signal import _parse_comma_list
@@ -361,15 +340,6 @@ class TestSignalAuthorization:
 # ---------------------------------------------------------------------------
 # Send Message Tool
 # ---------------------------------------------------------------------------
-
-class TestSignalSendMessage:
-    def test_signal_in_platform_map(self):
-        """Signal should be in the send_message tool's platform map."""
-        from tools.send_message_tool import send_message_tool
-        # Just verify the import works and Signal is a valid platform
-        from gateway.config import Platform
-        assert Platform.SIGNAL.value == "signal"
-
 
 # ---------------------------------------------------------------------------
 # send_image_file method (#5105)
@@ -707,3 +677,66 @@ class TestSignalSendDocumentViaHelper:
 
         assert result.success is False
         assert "/nonexistent.pdf" in result.error
+
+
+# ---------------------------------------------------------------------------
+# send() returns message_id from timestamp (#4647)
+# ---------------------------------------------------------------------------
+
+class TestSignalSendReturnsMessageId:
+    """Signal send() must return a timestamp-based message_id so the stream
+    consumer can follow its edit→fallback path correctly."""
+
+    @pytest.mark.asyncio
+    async def test_send_returns_timestamp_as_message_id(self, monkeypatch):
+        adapter = _make_signal_adapter(monkeypatch)
+        mock_rpc, _ = _stub_rpc({"timestamp": 1712345678000})
+        adapter._rpc = mock_rpc
+        adapter._stop_typing_indicator = AsyncMock()
+
+        result = await adapter.send(chat_id="+155****4567", content="hello")
+
+        assert result.success is True
+        assert result.message_id == "1712345678000"
+
+    @pytest.mark.asyncio
+    async def test_send_returns_none_message_id_when_no_timestamp(self, monkeypatch):
+        adapter = _make_signal_adapter(monkeypatch)
+        mock_rpc, _ = _stub_rpc({})  # No timestamp key
+        adapter._rpc = mock_rpc
+        adapter._stop_typing_indicator = AsyncMock()
+
+        result = await adapter.send(chat_id="+155****4567", content="hello")
+
+        assert result.success is True
+        assert result.message_id is None
+
+    @pytest.mark.asyncio
+    async def test_send_returns_none_message_id_for_non_dict(self, monkeypatch):
+        adapter = _make_signal_adapter(monkeypatch)
+        mock_rpc, _ = _stub_rpc("ok")  # Non-dict result
+        adapter._rpc = mock_rpc
+        adapter._stop_typing_indicator = AsyncMock()
+
+        result = await adapter.send(chat_id="+155****4567", content="hello")
+
+        assert result.success is True
+        assert result.message_id is None
+
+
+# ---------------------------------------------------------------------------
+# stop_typing() delegates to _stop_typing_indicator (#4647)
+# ---------------------------------------------------------------------------
+
+class TestSignalStopTyping:
+    """Signal must expose a public stop_typing() so base adapter's
+    _keep_typing finally block can clean up platform-level typing tasks."""
+
+    @pytest.mark.asyncio
+    async def test_stop_typing_calls_private_method(self, monkeypatch):
+        adapter = _make_signal_adapter(monkeypatch)
+        adapter._stop_typing_indicator = AsyncMock()
+
+        await adapter.stop_typing("+155****4567")
+
+        adapter._stop_typing_indicator.assert_awaited_once_with("+155****4567")

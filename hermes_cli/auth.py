@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 import yaml
 
-from hermes_cli.config import get_hermes_home, get_config_path
+from hermes_cli.config import get_hermes_home, get_config_path, read_raw_config
 from hermes_constants import OPENROUTER_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -67,12 +67,20 @@ DEFAULT_AGENT_KEY_MIN_TTL_SECONDS = 30 * 60  # 30 minutes
 ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120       # refresh 2 min before expiry
 DEVICE_AUTH_POLL_INTERVAL_CAP_SECONDS = 1     # poll at most every 1s
 DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+DEFAULT_QWEN_BASE_URL = "https://portal.qwen.ai/v1"
 DEFAULT_GITHUB_MODELS_BASE_URL = "https://api.githubcopilot.com"
 DEFAULT_COPILOT_ACP_BASE_URL = "acp://copilot"
-DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+DEFAULT_OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1"
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
+QWEN_OAUTH_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
+QWEN_OAUTH_TOKEN_URL = "https://chat.qwen.ai/api/v1/oauth2/token"
+QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
+
+# Google Gemini OAuth (google-gemini-cli provider, Cloud Code Assist backend)
+DEFAULT_GEMINI_CLOUDCODE_BASE_URL = "cloudcode-pa://google"
+GEMINI_OAUTH_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 60  # refresh 60s before expiry
 
 
 # =============================================================================
@@ -112,12 +120,25 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         auth_type="oauth_external",
         inference_base_url=DEFAULT_CODEX_BASE_URL,
     ),
+    "qwen-oauth": ProviderConfig(
+        id="qwen-oauth",
+        name="Qwen OAuth",
+        auth_type="oauth_external",
+        inference_base_url=DEFAULT_QWEN_BASE_URL,
+    ),
+    "google-gemini-cli": ProviderConfig(
+        id="google-gemini-cli",
+        name="Google Gemini (OAuth)",
+        auth_type="oauth_external",
+        inference_base_url=DEFAULT_GEMINI_CLOUDCODE_BASE_URL,
+    ),
     "copilot": ProviderConfig(
         id="copilot",
         name="GitHub Copilot",
         auth_type="api_key",
         inference_base_url=DEFAULT_GITHUB_MODELS_BASE_URL,
         api_key_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"),
+        base_url_env_var="COPILOT_API_BASE_URL",
     ),
     "copilot-acp": ProviderConfig(
         id="copilot-acp",
@@ -149,6 +170,21 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url="https://api.moonshot.ai/v1",
         api_key_env_vars=("KIMI_API_KEY",),
         base_url_env_var="KIMI_BASE_URL",
+    ),
+    "kimi-coding-cn": ProviderConfig(
+        id="kimi-coding-cn",
+        name="Kimi / Moonshot (China)",
+        auth_type="api_key",
+        inference_base_url="https://api.moonshot.cn/v1",
+        api_key_env_vars=("KIMI_CN_API_KEY",),
+    ),
+    "arcee": ProviderConfig(
+        id="arcee",
+        name="Arcee AI",
+        auth_type="api_key",
+        inference_base_url="https://api.arcee.ai/api/v1",
+        api_key_env_vars=("ARCEEAI_API_KEY",),
+        base_url_env_var="ARCEE_BASE_URL",
     ),
     "minimax": ProviderConfig(
         id="minimax",
@@ -189,9 +225,25 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("DEEPSEEK_API_KEY",),
         base_url_env_var="DEEPSEEK_BASE_URL",
     ),
+    "xai": ProviderConfig(
+        id="xai",
+        name="xAI",
+        auth_type="api_key",
+        inference_base_url="https://api.x.ai/v1",
+        api_key_env_vars=("XAI_API_KEY",),
+        base_url_env_var="XAI_BASE_URL",
+    ),
+    "nvidia": ProviderConfig(
+        id="nvidia",
+        name="NVIDIA NIM",
+        auth_type="api_key",
+        inference_base_url="https://integrate.api.nvidia.com/v1",
+        api_key_env_vars=("NVIDIA_API_KEY",),
+        base_url_env_var="NVIDIA_BASE_URL",
+    ),
     "ai-gateway": ProviderConfig(
         id="ai-gateway",
-        name="AI Gateway",
+        name="Vercel AI Gateway",
         auth_type="api_key",
         inference_base_url="https://ai-gateway.vercel.sh/v1",
         api_key_env_vars=("AI_GATEWAY_API_KEY",),
@@ -233,14 +285,60 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("HF_TOKEN",),
         base_url_env_var="HF_BASE_URL",
     ),
+    "xiaomi": ProviderConfig(
+        id="xiaomi",
+        name="Xiaomi MiMo",
+        auth_type="api_key",
+        inference_base_url="https://api.xiaomimimo.com/v1",
+        api_key_env_vars=("XIAOMI_API_KEY",),
+        base_url_env_var="XIAOMI_BASE_URL",
+    ),
+    "ollama-cloud": ProviderConfig(
+        id="ollama-cloud",
+        name="Ollama Cloud",
+        auth_type="api_key",
+        inference_base_url=DEFAULT_OLLAMA_CLOUD_BASE_URL,
+        api_key_env_vars=("OLLAMA_API_KEY",),
+        base_url_env_var="OLLAMA_BASE_URL",
+    ),
+    "bedrock": ProviderConfig(
+        id="bedrock",
+        name="AWS Bedrock",
+        auth_type="aws_sdk",
+        inference_base_url="https://bedrock-runtime.us-east-1.amazonaws.com",
+        api_key_env_vars=(),
+        base_url_env_var="BEDROCK_BASE_URL",
+    ),
 }
+
+
+# =============================================================================
+# Anthropic Key Helper
+# =============================================================================
+
+def get_anthropic_key() -> str:
+    """Return the first usable Anthropic credential, or ``""``.
+
+    Checks both the ``.env`` file (via ``get_env_value``) and the process
+    environment (``os.getenv``).  The fallback order mirrors the
+    ``PROVIDER_REGISTRY["anthropic"].api_key_env_vars`` tuple:
+
+        ANTHROPIC_API_KEY -> ANTHROPIC_TOKEN -> CLAUDE_CODE_OAUTH_TOKEN
+    """
+    from hermes_cli.config import get_env_value
+
+    for var in PROVIDER_REGISTRY["anthropic"].api_key_env_vars:
+        value = get_env_value(var) or os.getenv(var, "")
+        if value:
+            return value
+    return ""
 
 
 # =============================================================================
 # Kimi Code Endpoint Detection
 # =============================================================================
 
-# Kimi Code (platform.kimi.ai) issues keys prefixed "sk-kimi-" that only work
+# Kimi Code (kimi.com/code) issues keys prefixed "sk-kimi-" that only work
 # on api.kimi.com/coding/v1.  Legacy keys from platform.moonshot.ai work on
 # api.moonshot.ai/v1 (the default).  Auto-detect when user hasn't set
 # KIMI_BASE_URL explicitly.
@@ -259,44 +357,6 @@ def _resolve_kimi_base_url(api_key: str, default_url: str, env_override: str) ->
         return KIMI_CODE_BASE_URL
     return default_url
 
-
-def _gh_cli_candidates() -> list[str]:
-    """Return candidate ``gh`` binary paths, including common Homebrew installs."""
-    candidates: list[str] = []
-
-    resolved = shutil.which("gh")
-    if resolved:
-        candidates.append(resolved)
-
-    for candidate in (
-        "/opt/homebrew/bin/gh",
-        "/usr/local/bin/gh",
-        str(Path.home() / ".local" / "bin" / "gh"),
-    ):
-        if candidate in candidates:
-            continue
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            candidates.append(candidate)
-
-    return candidates
-
-
-def _try_gh_cli_token() -> Optional[str]:
-    """Return a token from ``gh auth token`` when the GitHub CLI is available."""
-    for gh_path in _gh_cli_candidates():
-        try:
-            result = subprocess.run(
-                [gh_path, "auth", "token"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            logger.debug("gh CLI token lookup failed (%s): %s", gh_path, exc)
-            continue
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    return None
 
 
 _PLACEHOLDER_SECRET_VALUES = {
@@ -358,13 +418,16 @@ def _resolve_api_key_provider_secret(
 # Z.AI has separate billing for general vs coding plans, and global vs China
 # endpoints.  A key that works on one may return "Insufficient balance" on
 # another.  We probe at setup time and store the working endpoint.
+# Each entry lists candidate models to try in order — newer coding plan accounts
+# may only have access to recent models (glm-5.1, glm-5v-turbo) while older
+# ones still use glm-4.7.
 
 ZAI_ENDPOINTS = [
-    # (id, base_url, default_model, label)
-    ("global",        "https://api.z.ai/api/paas/v4",        "glm-5",   "Global"),
-    ("cn",            "https://open.bigmodel.cn/api/paas/v4", "glm-5",   "China"),
-    ("coding-global", "https://api.z.ai/api/coding/paas/v4",  "glm-4.7", "Global (Coding Plan)"),
-    ("coding-cn",     "https://open.bigmodel.cn/api/coding/paas/v4", "glm-4.7", "China (Coding Plan)"),
+    # (id, base_url, probe_models, label)
+    ("global",        "https://api.z.ai/api/paas/v4",        ["glm-5"],   "Global"),
+    ("cn",            "https://open.bigmodel.cn/api/paas/v4", ["glm-5"],   "China"),
+    ("coding-global", "https://api.z.ai/api/coding/paas/v4",  ["glm-5.1", "glm-5v-turbo", "glm-4.7"], "Global (Coding Plan)"),
+    ("coding-cn",     "https://open.bigmodel.cn/api/coding/paas/v4", ["glm-5.1", "glm-5v-turbo", "glm-4.7"], "China (Coding Plan)"),
 ]
 
 
@@ -372,35 +435,37 @@ def detect_zai_endpoint(api_key: str, timeout: float = 8.0) -> Optional[Dict[str
     """Probe z.ai endpoints to find one that accepts this API key.
 
     Returns {"id": ..., "base_url": ..., "model": ..., "label": ...} for the
-    first working endpoint, or None if all fail.
+    first working endpoint, or None if all fail.  For endpoints with multiple
+    candidate models, tries each in order and returns the first that succeeds.
     """
-    for ep_id, base_url, model, label in ZAI_ENDPOINTS:
-        try:
-            resp = httpx.post(
-                f"{base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "stream": False,
-                    "max_tokens": 1,
-                    "messages": [{"role": "user", "content": "ping"}],
-                },
-                timeout=timeout,
-            )
-            if resp.status_code == 200:
-                logger.debug("Z.AI endpoint probe: %s (%s) OK", ep_id, base_url)
-                return {
-                    "id": ep_id,
-                    "base_url": base_url,
-                    "model": model,
-                    "label": label,
-                }
-            logger.debug("Z.AI endpoint probe: %s returned %s", ep_id, resp.status_code)
-        except Exception as exc:
-            logger.debug("Z.AI endpoint probe: %s failed: %s", ep_id, exc)
+    for ep_id, base_url, probe_models, label in ZAI_ENDPOINTS:
+        for model in probe_models:
+            try:
+                resp = httpx.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "stream": False,
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "ping"}],
+                    },
+                    timeout=timeout,
+                )
+                if resp.status_code == 200:
+                    logger.debug("Z.AI endpoint probe: %s (%s) model=%s OK", ep_id, base_url, model)
+                    return {
+                        "id": ep_id,
+                        "base_url": base_url,
+                        "model": model,
+                        "label": label,
+                    }
+                logger.debug("Z.AI endpoint probe: %s model=%s returned %s", ep_id, model, resp.status_code)
+            except Exception as exc:
+                logger.debug("Z.AI endpoint probe: %s model=%s failed: %s", ep_id, model, exc)
     return None
 
 
@@ -695,6 +760,49 @@ def write_credential_pool(provider_id: str, entries: List[Dict[str, Any]]) -> Pa
         return _save_auth_store(auth_store)
 
 
+def suppress_credential_source(provider_id: str, source: str) -> None:
+    """Mark a credential source as suppressed so it won't be re-seeded."""
+    with _auth_store_lock():
+        auth_store = _load_auth_store()
+        suppressed = auth_store.setdefault("suppressed_sources", {})
+        provider_list = suppressed.setdefault(provider_id, [])
+        if source not in provider_list:
+            provider_list.append(source)
+        _save_auth_store(auth_store)
+
+
+def is_source_suppressed(provider_id: str, source: str) -> bool:
+    """Check if a credential source has been suppressed by the user."""
+    try:
+        auth_store = _load_auth_store()
+        suppressed = auth_store.get("suppressed_sources", {})
+        return source in suppressed.get(provider_id, [])
+    except Exception:
+        return False
+
+
+def unsuppress_credential_source(provider_id: str, source: str) -> bool:
+    """Clear a suppression marker so the source will be re-seeded on the next load.
+
+    Returns True if a marker was cleared, False if no marker existed.
+    """
+    with _auth_store_lock():
+        auth_store = _load_auth_store()
+        suppressed = auth_store.get("suppressed_sources")
+        if not isinstance(suppressed, dict):
+            return False
+        provider_list = suppressed.get(provider_id)
+        if not isinstance(provider_list, list) or source not in provider_list:
+            return False
+        provider_list.remove(source)
+        if not provider_list:
+            suppressed.pop(provider_id, None)
+        if not suppressed:
+            auth_store.pop("suppressed_sources", None)
+        _save_auth_store(auth_store)
+        return True
+
+
 def get_provider_auth_state(provider_id: str) -> Optional[Dict[str, Any]]:
     """Return persisted auth state for a provider, or None."""
     auth_store = _load_auth_store()
@@ -705,6 +813,57 @@ def get_active_provider() -> Optional[str]:
     """Return the currently active provider ID from auth store."""
     auth_store = _load_auth_store()
     return auth_store.get("active_provider")
+
+
+def is_provider_explicitly_configured(provider_id: str) -> bool:
+    """Return True only if the user has explicitly configured this provider.
+
+    Checks:
+      1. active_provider in auth.json matches
+      2. model.provider in config.yaml matches
+      3. Provider-specific env vars are set (e.g. ANTHROPIC_API_KEY)
+
+    This is used to gate auto-discovery of external credentials (e.g.
+    Claude Code's ~/.claude/.credentials.json) so they are never used
+    without the user's explicit choice.  See PR #4210 for the same
+    pattern applied to the setup wizard gate.
+    """
+    normalized = (provider_id or "").strip().lower()
+
+    # 1. Check auth.json active_provider
+    try:
+        auth_store = _load_auth_store()
+        active = (auth_store.get("active_provider") or "").strip().lower()
+        if active and active == normalized:
+            return True
+    except Exception:
+        pass
+
+    # 2. Check config.yaml model.provider
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        model_cfg = cfg.get("model")
+        if isinstance(model_cfg, dict):
+            cfg_provider = (model_cfg.get("provider") or "").strip().lower()
+            if cfg_provider == normalized:
+                return True
+    except Exception:
+        pass
+
+    # 3. Check provider-specific env vars
+    # Exclude CLAUDE_CODE_OAUTH_TOKEN — it's set by Claude Code itself,
+    # not by the user explicitly configuring anthropic in Hermes.
+    _IMPLICIT_ENV_VARS = {"CLAUDE_CODE_OAUTH_TOKEN"}
+    pconfig = PROVIDER_REGISTRY.get(normalized)
+    if pconfig and pconfig.auth_type == "api_key":
+        for env_var in pconfig.api_key_env_vars:
+            if env_var in _IMPLICIT_ENV_VARS:
+                continue
+            if has_usable_secret(os.getenv(env_var, "")):
+                return True
+
+    return False
 
 
 def clear_provider_auth(provider_id: Optional[str] = None) -> bool:
@@ -809,7 +968,10 @@ def resolve_provider(
     _PROVIDER_ALIASES = {
         "glm": "zai", "z-ai": "zai", "z.ai": "zai", "zhipu": "zai",
         "google": "gemini", "google-gemini": "gemini", "google-ai-studio": "gemini",
-        "kimi": "kimi-coding", "moonshot": "kimi-coding",
+        "x-ai": "xai", "x.ai": "xai", "grok": "xai",
+        "kimi": "kimi-coding", "kimi-for-coding": "kimi-coding", "moonshot": "kimi-coding",
+        "kimi-cn": "kimi-coding-cn", "moonshot-cn": "kimi-coding-cn",
+        "arcee-ai": "arcee", "arceeai": "arcee",
         "minimax-china": "minimax-cn", "minimax_cn": "minimax-cn",
         "claude": "anthropic", "claude-code": "anthropic",
         "github": "copilot", "github-copilot": "copilot",
@@ -817,12 +979,16 @@ def resolve_provider(
         "github-copilot-acp": "copilot-acp", "copilot-acp-agent": "copilot-acp",
         "aigateway": "ai-gateway", "vercel": "ai-gateway", "vercel-ai-gateway": "ai-gateway",
         "opencode": "opencode-zen", "zen": "opencode-zen",
+        "qwen-portal": "qwen-oauth", "qwen-cli": "qwen-oauth", "qwen-oauth": "qwen-oauth", "google-gemini-cli": "google-gemini-cli", "gemini-cli": "google-gemini-cli", "gemini-oauth": "google-gemini-cli",
         "hf": "huggingface", "hugging-face": "huggingface", "huggingface-hub": "huggingface",
+        "mimo": "xiaomi", "xiaomi-mimo": "xiaomi",
+        "aws": "bedrock", "aws-bedrock": "bedrock", "amazon-bedrock": "bedrock", "amazon": "bedrock",
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
         # Local server aliases — route through the generic custom provider
         "lmstudio": "custom", "lm-studio": "custom", "lm_studio": "custom",
-        "ollama": "custom", "vllm": "custom", "llamacpp": "custom",
+        "ollama": "custom", "ollama_cloud": "ollama-cloud",
+        "vllm": "custom", "llamacpp": "custom",
         "llama.cpp": "custom", "llama-cpp": "custom",
     }
     normalized = _PROVIDER_ALIASES.get(normalized, normalized)
@@ -873,6 +1039,15 @@ def resolve_provider(
         for env_var in pconfig.api_key_env_vars:
             if has_usable_secret(os.getenv(env_var, "")):
                 return pid
+
+    # AWS Bedrock — detect via boto3 credential chain (IAM roles, SSO, env vars).
+    # This runs after API-key providers so explicit keys always win.
+    try:
+        from agent.bedrock_adapter import has_aws_credentials
+        if has_aws_credentials():
+            return "bedrock"
+    except ImportError:
+        pass  # boto3 not installed — skip Bedrock auto-detection
 
     raise AuthError(
         "No inference provider configured. Run 'hermes model' to choose a "
@@ -946,6 +1121,253 @@ def _codex_access_token_is_expiring(access_token: Any, skew_seconds: int) -> boo
     return float(exp) <= (time.time() + max(0, int(skew_seconds)))
 
 
+def _qwen_cli_auth_path() -> Path:
+    return Path.home() / ".qwen" / "oauth_creds.json"
+
+
+def _read_qwen_cli_tokens() -> Dict[str, Any]:
+    auth_path = _qwen_cli_auth_path()
+    if not auth_path.exists():
+        raise AuthError(
+            "Qwen CLI credentials not found. Run 'qwen auth qwen-oauth' first.",
+            provider="qwen-oauth",
+            code="qwen_auth_missing",
+        )
+    try:
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise AuthError(
+            f"Failed to read Qwen CLI credentials from {auth_path}: {exc}",
+            provider="qwen-oauth",
+            code="qwen_auth_read_failed",
+        ) from exc
+    if not isinstance(data, dict):
+        raise AuthError(
+            f"Invalid Qwen CLI credentials in {auth_path}.",
+            provider="qwen-oauth",
+            code="qwen_auth_invalid",
+        )
+    return data
+
+
+def _save_qwen_cli_tokens(tokens: Dict[str, Any]) -> Path:
+    auth_path = _qwen_cli_auth_path()
+    auth_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = auth_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(tokens, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+    tmp_path.replace(auth_path)
+    return auth_path
+
+
+def _qwen_access_token_is_expiring(expiry_date_ms: Any, skew_seconds: int = QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS) -> bool:
+    try:
+        expiry_ms = int(expiry_date_ms)
+    except Exception:
+        return True
+    return (time.time() + max(0, int(skew_seconds))) * 1000 >= expiry_ms
+
+
+def _refresh_qwen_cli_tokens(tokens: Dict[str, Any], timeout_seconds: float = 20.0) -> Dict[str, Any]:
+    refresh_token = str(tokens.get("refresh_token", "") or "").strip()
+    if not refresh_token:
+        raise AuthError(
+            "Qwen OAuth refresh token missing. Re-run 'qwen auth qwen-oauth'.",
+            provider="qwen-oauth",
+            code="qwen_refresh_token_missing",
+        )
+
+    try:
+        response = httpx.post(
+            QWEN_OAUTH_TOKEN_URL,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+            },
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": QWEN_OAUTH_CLIENT_ID,
+            },
+            timeout=timeout_seconds,
+        )
+    except Exception as exc:
+        raise AuthError(
+            f"Qwen OAuth refresh failed: {exc}",
+            provider="qwen-oauth",
+            code="qwen_refresh_failed",
+        ) from exc
+
+    if response.status_code >= 400:
+        body = response.text.strip()
+        raise AuthError(
+            "Qwen OAuth refresh failed. Re-run 'qwen auth qwen-oauth'."
+            + (f" Response: {body}" if body else ""),
+            provider="qwen-oauth",
+            code="qwen_refresh_failed",
+        )
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise AuthError(
+            f"Qwen OAuth refresh returned invalid JSON: {exc}",
+            provider="qwen-oauth",
+            code="qwen_refresh_invalid_json",
+        ) from exc
+
+    if not isinstance(payload, dict) or not str(payload.get("access_token", "") or "").strip():
+        raise AuthError(
+            "Qwen OAuth refresh response missing access_token.",
+            provider="qwen-oauth",
+            code="qwen_refresh_invalid_response",
+        )
+
+    expires_in = payload.get("expires_in")
+    try:
+        expires_in_seconds = int(expires_in)
+    except Exception:
+        expires_in_seconds = 6 * 60 * 60
+
+    refreshed = {
+        "access_token": str(payload.get("access_token", "") or "").strip(),
+        "refresh_token": str(payload.get("refresh_token", refresh_token) or refresh_token).strip(),
+        "token_type": str(payload.get("token_type", tokens.get("token_type", "Bearer")) or "Bearer").strip() or "Bearer",
+        "resource_url": str(payload.get("resource_url", tokens.get("resource_url", "portal.qwen.ai")) or "portal.qwen.ai").strip(),
+        "expiry_date": int(time.time() * 1000) + max(1, expires_in_seconds) * 1000,
+    }
+    _save_qwen_cli_tokens(refreshed)
+    return refreshed
+
+
+def resolve_qwen_runtime_credentials(
+    *,
+    force_refresh: bool = False,
+    refresh_if_expiring: bool = True,
+    refresh_skew_seconds: int = QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+) -> Dict[str, Any]:
+    tokens = _read_qwen_cli_tokens()
+    access_token = str(tokens.get("access_token", "") or "").strip()
+    should_refresh = bool(force_refresh)
+    if not should_refresh and refresh_if_expiring:
+        should_refresh = _qwen_access_token_is_expiring(tokens.get("expiry_date"), refresh_skew_seconds)
+    if should_refresh:
+        tokens = _refresh_qwen_cli_tokens(tokens)
+        access_token = str(tokens.get("access_token", "") or "").strip()
+    if not access_token:
+        raise AuthError(
+            "Qwen OAuth access token missing. Re-run 'qwen auth qwen-oauth'.",
+            provider="qwen-oauth",
+            code="qwen_access_token_missing",
+        )
+
+    base_url = os.getenv("HERMES_QWEN_BASE_URL", "").strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
+    return {
+        "provider": "qwen-oauth",
+        "base_url": base_url,
+        "api_key": access_token,
+        "source": "qwen-cli",
+        "expires_at_ms": tokens.get("expiry_date"),
+        "auth_file": str(_qwen_cli_auth_path()),
+    }
+
+
+def get_qwen_auth_status() -> Dict[str, Any]:
+    auth_path = _qwen_cli_auth_path()
+    try:
+        creds = resolve_qwen_runtime_credentials(refresh_if_expiring=False)
+        return {
+            "logged_in": True,
+            "auth_file": str(auth_path),
+            "source": creds.get("source"),
+            "api_key": creds.get("api_key"),
+            "expires_at_ms": creds.get("expires_at_ms"),
+        }
+    except AuthError as exc:
+        return {
+            "logged_in": False,
+            "auth_file": str(auth_path),
+            "error": str(exc),
+        }
+
+
+# =============================================================================
+# Google Gemini OAuth (google-gemini-cli) — PKCE flow + Cloud Code Assist.
+#
+# Tokens live in ~/.hermes/auth/google_oauth.json (managed by agent.google_oauth).
+# The `base_url` here is the marker "cloudcode-pa://google" that run_agent.py
+# uses to construct a GeminiCloudCodeClient instead of the default OpenAI SDK.
+# Actual HTTP traffic goes to https://cloudcode-pa.googleapis.com/v1internal:*.
+# =============================================================================
+
+def resolve_gemini_oauth_runtime_credentials(
+    *,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    """Resolve runtime OAuth creds for google-gemini-cli."""
+    try:
+        from agent.google_oauth import (
+            GoogleOAuthError,
+            _credentials_path,
+            get_valid_access_token,
+            load_credentials,
+        )
+    except ImportError as exc:
+        raise AuthError(
+            f"agent.google_oauth is not importable: {exc}",
+            provider="google-gemini-cli",
+            code="google_oauth_module_missing",
+        ) from exc
+
+    try:
+        access_token = get_valid_access_token(force_refresh=force_refresh)
+    except GoogleOAuthError as exc:
+        raise AuthError(
+            str(exc),
+            provider="google-gemini-cli",
+            code=exc.code,
+        ) from exc
+
+    creds = load_credentials()
+    base_url = DEFAULT_GEMINI_CLOUDCODE_BASE_URL
+    return {
+        "provider": "google-gemini-cli",
+        "base_url": base_url,
+        "api_key": access_token,
+        "source": "google-oauth",
+        "expires_at_ms": (creds.expires_ms if creds else None),
+        "auth_file": str(_credentials_path()),
+        "email": (creds.email if creds else "") or "",
+        "project_id": (creds.project_id if creds else "") or "",
+    }
+
+
+def get_gemini_oauth_auth_status() -> Dict[str, Any]:
+    """Return a status dict for `hermes auth list` / `hermes status`."""
+    try:
+        from agent.google_oauth import _credentials_path, load_credentials
+    except ImportError:
+        return {"logged_in": False, "error": "agent.google_oauth unavailable"}
+    auth_path = _credentials_path()
+    creds = load_credentials()
+    if creds is None or not creds.access_token:
+        return {
+            "logged_in": False,
+            "auth_file": str(auth_path),
+            "error": "not logged in",
+        }
+    return {
+        "logged_in": True,
+        "auth_file": str(auth_path),
+        "source": "google-oauth",
+        "api_key": creds.access_token,
+        "expires_at_ms": creds.expires_ms,
+        "email": creds.email,
+        "project_id": creds.project_id,
+    }
+
+
+
 # =============================================================================
 # SSH / remote session detection
 # =============================================================================
@@ -1010,6 +1432,49 @@ def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
         "tokens": tokens,
         "last_refresh": state.get("last_refresh"),
     }
+
+
+def _write_codex_cli_tokens(
+    access_token: str,
+    refresh_token: str,
+    *,
+    last_refresh: Optional[str] = None,
+) -> None:
+    """Write refreshed tokens back to ~/.codex/auth.json.
+
+    OpenAI OAuth refresh tokens are single-use and rotate on every refresh.
+    When Hermes refreshes a token it consumes the old refresh_token; if we
+    don't write the new pair back, the Codex CLI (or VS Code extension) will
+    fail with ``refresh_token_reused`` on its next refresh attempt.
+
+    This mirrors the Anthropic write-back to ~/.claude/.credentials.json
+    via ``_write_claude_code_credentials()``.
+    """
+    codex_home = os.getenv("CODEX_HOME", "").strip()
+    if not codex_home:
+        codex_home = str(Path.home() / ".codex")
+    auth_path = Path(codex_home).expanduser() / "auth.json"
+    try:
+        existing: Dict[str, Any] = {}
+        if auth_path.is_file():
+            existing = json.loads(auth_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict):
+            existing = {}
+
+        tokens_dict = existing.get("tokens")
+        if not isinstance(tokens_dict, dict):
+            tokens_dict = {}
+        tokens_dict["access_token"] = access_token
+        tokens_dict["refresh_token"] = refresh_token
+        existing["tokens"] = tokens_dict
+        if last_refresh is not None:
+            existing["last_refresh"] = last_refresh
+
+        auth_path.parent.mkdir(parents=True, exist_ok=True)
+        auth_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        auth_path.chmod(0o600)
+    except (OSError, IOError) as exc:
+        logger.debug("Failed to write refreshed tokens to %s: %s", auth_path, exc)
 
 
 def _save_codex_tokens(tokens: Dict[str, str], last_refresh: str = None) -> None:
@@ -1134,6 +1599,12 @@ def _refresh_codex_auth_tokens(
     updated_tokens["refresh_token"] = refreshed["refresh_token"]
 
     _save_codex_tokens(updated_tokens)
+    # Write back to ~/.codex/auth.json so Codex CLI / VS Code stay in sync.
+    _write_codex_cli_tokens(
+        refreshed["access_token"],
+        refreshed["refresh_token"],
+        last_refresh=refreshed.get("last_refresh"),
+    )
     return updated_tokens
 
 
@@ -1261,7 +1732,15 @@ def _resolve_verify(
     if effective_insecure:
         return False
     if effective_ca:
-        return str(effective_ca)
+        ca_path = str(effective_ca)
+        if not os.path.isfile(ca_path):
+            import logging
+            logging.getLogger("hermes.auth").warning(
+                "CA bundle path does not exist: %s — falling back to default certificates",
+                ca_path,
+            )
+            return True
+        return ca_path
     return True
 
 
@@ -1934,7 +2413,40 @@ def resolve_nous_runtime_credentials(
 # =============================================================================
 
 def get_nous_auth_status() -> Dict[str, Any]:
-    """Status snapshot for `hermes status` output."""
+    """Status snapshot for `hermes status` output.
+
+    Checks the credential pool first (where the dashboard device-code flow
+    and ``hermes auth`` store credentials), then falls back to the legacy
+    auth-store provider state.
+    """
+    # Check credential pool first — the dashboard device-code flow saves
+    # here but may not have written to the auth store yet.
+    try:
+        from agent.credential_pool import load_pool
+        pool = load_pool("nous")
+        if pool and pool.has_credentials():
+            entry = pool.select()
+            if entry is not None:
+                access_token = (
+                    getattr(entry, "access_token", None)
+                    or getattr(entry, "runtime_api_key", "")
+                )
+                if access_token:
+                    return {
+                        "logged_in": True,
+                        "portal_base_url": getattr(entry, "portal_base_url", None)
+                            or getattr(entry, "base_url", None),
+                        "inference_base_url": getattr(entry, "inference_base_url", None)
+                            or getattr(entry, "base_url", None),
+                        "access_token": access_token,
+                        "access_expires_at": getattr(entry, "expires_at", None),
+                        "agent_key_expires_at": getattr(entry, "agent_key_expires_at", None),
+                        "has_refresh_token": bool(getattr(entry, "refresh_token", None)),
+                    }
+    except Exception:
+        pass
+
+    # Fall back to auth-store provider state
     state = get_provider_auth_state("nous")
     if not state:
         return {
@@ -2018,7 +2530,7 @@ def get_api_key_provider_status(provider_id: str) -> Dict[str, Any]:
     if pconfig.base_url_env_var:
         env_url = os.getenv(pconfig.base_url_env_var, "").strip()
 
-    if provider_id == "kimi-coding":
+    if provider_id in ("kimi-coding", "kimi-coding-cn"):
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)
     elif env_url:
         base_url = env_url
@@ -2072,12 +2584,23 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
         return get_nous_auth_status()
     if target == "openai-codex":
         return get_codex_auth_status()
+    if target == "qwen-oauth":
+        return get_qwen_auth_status()
+    if target == "google-gemini-cli":
+        return get_gemini_oauth_auth_status()
     if target == "copilot-acp":
         return get_external_process_provider_status(target)
     # API-key providers
     pconfig = PROVIDER_REGISTRY.get(target)
     if pconfig and pconfig.auth_type == "api_key":
         return get_api_key_provider_status(target)
+    # AWS SDK providers (Bedrock) — check via boto3 credential chain
+    if pconfig and pconfig.auth_type == "aws_sdk":
+        try:
+            from agent.bedrock_adapter import has_aws_credentials
+            return {"logged_in": has_aws_credentials(), "provider": target}
+        except ImportError:
+            return {"logged_in": False, "provider": target, "error": "boto3 not installed"}
     return {"logged_in": False}
 
 
@@ -2102,7 +2625,7 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
     if pconfig.base_url_env_var:
         env_url = os.getenv(pconfig.base_url_env_var, "").strip()
 
-    if provider_id == "kimi-coding":
+    if provider_id in ("kimi-coding", "kimi-coding-cn"):
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)
     elif provider_id == "zai":
         base_url = _resolve_zai_base_url(api_key, pconfig.inference_base_url, env_url)
@@ -2160,33 +2683,6 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
 
 
 # =============================================================================
-# External credential detection
-# =============================================================================
-
-def detect_external_credentials() -> List[Dict[str, Any]]:
-    """Scan for credentials from other CLI tools that Hermes can reuse.
-
-    Returns a list of dicts, each with:
-      - provider: str   -- Hermes provider id (e.g. "openai-codex")
-      - path: str       -- filesystem path where creds were found
-      - label: str      -- human-friendly description for the setup UI
-    """
-    found: List[Dict[str, Any]] = []
-
-    # Codex CLI: ~/.codex/auth.json (importable, not shared)
-    cli_tokens = _import_codex_cli_tokens()
-    if cli_tokens:
-        codex_path = Path.home() / ".codex" / "auth.json"
-        found.append({
-            "provider": "openai-codex",
-            "path": str(codex_path),
-            "label": f"Codex CLI credentials found ({codex_path}) — run `hermes auth` to create a separate session",
-        })
-
-    return found
-
-
-# =============================================================================
 # CLI Commands — login / logout
 # =============================================================================
 
@@ -2214,14 +2710,7 @@ def _update_config_for_provider(
     config_path = get_config_path()
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    config: Dict[str, Any] = {}
-    if config_path.exists():
-        try:
-            loaded = yaml.safe_load(config_path.read_text()) or {}
-            if isinstance(loaded, dict):
-                config = loaded
-        except Exception:
-            config = {}
+    config = read_raw_config()
 
     current_model = config.get("model")
     if isinstance(current_model, dict):
@@ -2258,12 +2747,8 @@ def _reset_config_provider() -> Path:
     if not config_path.exists():
         return config_path
 
-    try:
-        config = yaml.safe_load(config_path.read_text()) or {}
-    except Exception:
-        return config_path
-
-    if not isinstance(config, dict):
+    config = read_raw_config()
+    if not config:
         return config_path
 
     model = config.get("model")
@@ -2400,6 +2885,8 @@ def _prompt_model_selection(
             title=effective_title,
         )
         idx = menu.show()
+        from hermes_cli.curses_ui import flush_stdin
+        flush_stdin()
         if idx is None:
             return None
         print()
@@ -2409,7 +2896,7 @@ def _prompt_model_selection(
             custom = input("Enter model name: ").strip()
             return custom if custom else None
         return None
-    except (ImportError, NotImplementedError):
+    except (ImportError, NotImplementedError, OSError, subprocess.SubprocessError):
         pass
 
     # Fallback: numbered list
@@ -2840,17 +3327,28 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
 
         inference_base_url = auth_state["inference_base_url"]
 
+        # Snapshot the prior active_provider BEFORE _save_provider_state
+        # overwrites it to "nous".  If the user picks "Skip (keep current)"
+        # during model selection below, we restore this so the user's previous
+        # provider (e.g. openrouter) is preserved.
+        with _auth_store_lock():
+            _prior_store = _load_auth_store()
+            prior_active_provider = _prior_store.get("active_provider")
+
         with _auth_store_lock():
             auth_store = _load_auth_store()
             _save_provider_state(auth_store, "nous", auth_state)
             saved_to = _save_auth_store(auth_store)
 
-        config_path = _update_config_for_provider("nous", inference_base_url)
         print()
         print("Login successful!")
         print(f"  Auth state: {saved_to}")
-        print(f"  Config updated: {config_path} (model.provider=nous)")
 
+        # Resolve model BEFORE writing provider to config.yaml so we never
+        # leave the config in a half-updated state (provider=nous but model
+        # still set to the previous provider's model, e.g. opus from
+        # OpenRouter).  The auth.json active_provider was already set above.
+        selected_model = None
         try:
             runtime_key = auth_state.get("agent_key") or auth_state.get("access_token")
             if not isinstance(runtime_key, str) or not runtime_key:
@@ -2884,9 +3382,6 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                     unavailable_models=unavailable_models,
                     portal_url=_portal,
                 )
-                if selected_model:
-                    _save_model_choice(selected_model)
-                    print(f"Default model set to: {selected_model}")
             elif unavailable_models:
                 _url = (_portal or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
                 print("No free models currently available.")
@@ -2897,6 +3392,36 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
             message = format_auth_error(exc) if isinstance(exc, AuthError) else str(exc)
             print()
             print(f"Login succeeded, but could not fetch available models. Reason: {message}")
+
+        # Write provider + model atomically so config is never mismatched.
+        # If no model was selected (user picked "Skip (keep current)",
+        # model list fetch failed, or no curated models were available),
+        # preserve the user's previous provider — don't silently switch
+        # them to Nous with a mismatched model.  The Nous OAuth tokens
+        # stay saved for future use.
+        if not selected_model:
+            # Restore the prior active_provider that _save_provider_state
+            # overwrote to "nous".  config.yaml model.provider is left
+            # untouched, so the user's previous provider is fully preserved.
+            with _auth_store_lock():
+                auth_store = _load_auth_store()
+                if prior_active_provider:
+                    auth_store["active_provider"] = prior_active_provider
+                else:
+                    auth_store.pop("active_provider", None)
+                _save_auth_store(auth_store)
+            print()
+            print("No provider change. Nous credentials saved for future use.")
+            print("  Run `hermes model` again to switch to Nous Portal.")
+            return
+
+        config_path = _update_config_for_provider(
+            "nous", inference_base_url, default_model=selected_model,
+        )
+        if selected_model:
+            _save_model_choice(selected_model)
+            print(f"Default model set to: {selected_model}")
+        print(f"  Config updated: {config_path} (model.provider=nous)")
 
     except KeyboardInterrupt:
         print("\nLogin cancelled.")
