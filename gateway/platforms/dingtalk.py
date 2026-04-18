@@ -34,6 +34,7 @@ import re
 import traceback
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set
 
 try:
@@ -102,6 +103,21 @@ MAX_MESSAGE_LENGTH = 20000
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 _SESSION_WEBHOOKS_MAX = 500
 _DINGTALK_WEBHOOK_RE = re.compile(r'^https://(?:api|oapi)\.dingtalk\.com/')
+
+
+def _sdk_obj(module_or_ns, factory_name: str, **kwargs):
+    """Construct an Alibaba SDK request/header/runtime object when available.
+
+    Tests often inject a fake ``_card_sdk`` without importing the optional Alibaba
+    model packages.  In that case we only need lightweight attribute bags that
+    preserve the fields passed to the mocked async methods.
+    """
+    if module_or_ns is None:
+        return SimpleNamespace(**kwargs)
+    factory = getattr(module_or_ns, factory_name, None)
+    if factory is None:
+        return SimpleNamespace(**kwargs)
+    return factory(**kwargs)
 
 # DingTalk message type → runtime content type
 DINGTALK_TYPE_MAPPING = {
@@ -911,29 +927,35 @@ class DingTalkAdapter(BasePlatformAdapter):
             is_group = str(conversation_type) == "2"
             sender_staff_id = getattr(message, "sender_staff_id", "") or ""
 
-            runtime = tea_util_models.RuntimeOptions()
+            runtime = _sdk_obj(tea_util_models, "RuntimeOptions")
 
             # Step 1: Create card with STREAM callback type
-            create_request = dingtalk_card_models.CreateCardRequest(
+            create_request = _sdk_obj(
+                dingtalk_card_models,
+                "CreateCardRequest",
                 card_template_id=self._card_template_id,
                 out_track_id=out_track_id,
-                card_data=dingtalk_card_models.CreateCardRequestCardData(
+                card_data=_sdk_obj(
+                    dingtalk_card_models,
+                    "CreateCardRequestCardData",
                     card_param_map={"content": ""},
                 ),
                 callback_type="STREAM",
-                im_group_open_space_model=(
-                    dingtalk_card_models.CreateCardRequestImGroupOpenSpaceModel(
-                        support_forward=True,
-                    )
+                im_group_open_space_model=_sdk_obj(
+                    dingtalk_card_models,
+                    "CreateCardRequestImGroupOpenSpaceModel",
+                    support_forward=True,
                 ),
-                im_robot_open_space_model=(
-                    dingtalk_card_models.CreateCardRequestImRobotOpenSpaceModel(
-                        support_forward=True,
-                    )
+                im_robot_open_space_model=_sdk_obj(
+                    dingtalk_card_models,
+                    "CreateCardRequestImRobotOpenSpaceModel",
+                    support_forward=True,
                 ),
             )
 
-            create_headers = dingtalk_card_models.CreateCardHeaders(
+            create_headers = _sdk_obj(
+                dingtalk_card_models,
+                "CreateCardHeaders",
                 x_acs_dingtalk_access_token=token,
             )
 
@@ -944,14 +966,16 @@ class DingTalkAdapter(BasePlatformAdapter):
             # Step 2: Deliver card to the conversation
             if is_group:
                 open_space_id = f"dtv1.card//IM_GROUP.{conversation_id}"
-                deliver_request = dingtalk_card_models.DeliverCardRequest(
+                deliver_request = _sdk_obj(
+                    dingtalk_card_models,
+                    "DeliverCardRequest",
                     out_track_id=out_track_id,
                     user_id_type=1,
                     open_space_id=open_space_id,
-                    im_group_open_deliver_model=(
-                        dingtalk_card_models.DeliverCardRequestImGroupOpenDeliverModel(
-                            robot_code=self._robot_code,
-                        )
+                    im_group_open_deliver_model=_sdk_obj(
+                        dingtalk_card_models,
+                        "DeliverCardRequestImGroupOpenDeliverModel",
+                        robot_code=self._robot_code,
                     ),
                 )
             else:
@@ -962,18 +986,22 @@ class DingTalkAdapter(BasePlatformAdapter):
                     )
                     return None
                 open_space_id = f"dtv1.card//IM_ROBOT.{sender_staff_id}"
-                deliver_request = dingtalk_card_models.DeliverCardRequest(
+                deliver_request = _sdk_obj(
+                    dingtalk_card_models,
+                    "DeliverCardRequest",
                     out_track_id=out_track_id,
                     user_id_type=1,
                     open_space_id=open_space_id,
-                    im_robot_open_deliver_model=(
-                        dingtalk_card_models.DeliverCardRequestImRobotOpenDeliverModel(
-                            space_type="IM_ROBOT",
-                        )
+                    im_robot_open_deliver_model=_sdk_obj(
+                        dingtalk_card_models,
+                        "DeliverCardRequestImRobotOpenDeliverModel",
+                        space_type="IM_ROBOT",
                     ),
                 )
 
-            deliver_headers = dingtalk_card_models.DeliverCardHeaders(
+            deliver_headers = _sdk_obj(
+                dingtalk_card_models,
+                "DeliverCardHeaders",
                 x_acs_dingtalk_access_token=token,
             )
 
@@ -1058,7 +1086,9 @@ class DingTalkAdapter(BasePlatformAdapter):
         finalize: bool = False,
     ) -> None:
         """Stream content to an existing AI Card."""
-        stream_request = dingtalk_card_models.StreamingUpdateRequest(
+        stream_request = _sdk_obj(
+            dingtalk_card_models,
+            "StreamingUpdateRequest",
             out_track_id=out_track_id,
             guid=str(uuid.uuid4()),
             key="content",
@@ -1068,11 +1098,13 @@ class DingTalkAdapter(BasePlatformAdapter):
             is_error=False,
         )
 
-        stream_headers = dingtalk_card_models.StreamingUpdateHeaders(
+        stream_headers = _sdk_obj(
+            dingtalk_card_models,
+            "StreamingUpdateHeaders",
             x_acs_dingtalk_access_token=token,
         )
 
-        runtime = tea_util_models.RuntimeOptions()
+        runtime = _sdk_obj(tea_util_models, "RuntimeOptions")
         await self._card_sdk.streaming_update_with_options_async(
             stream_request, stream_headers, runtime
         )

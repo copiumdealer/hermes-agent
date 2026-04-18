@@ -155,16 +155,24 @@ def _strip_blocked_tools(toolsets: List[str]) -> List[str]:
     return [t for t in toolsets if t not in blocked_toolset_names]
 
 
-def _build_child_progress_callback(task_index: int, goal: str, parent_agent, task_count: int = 1) -> Optional[callable]:
+def _build_child_progress_callback(task_index: int, goal: str = "", parent_agent=None, task_count: int = 1) -> Optional[callable]:
     """Build a callback that relays child agent tool calls to the parent display.
 
     Two display paths:
       CLI:     prints tree-view lines above the parent's delegation spinner
       Gateway: batches tool names and relays to parent's progress callback
 
+    Accepts both the newer `(task_index, goal, parent_agent, task_count=...)`
+    form and the older `(task_index, parent_agent, task_count=...)` form used
+    by existing tests/callers.
+
     Returns None if no display mechanism is available, in which case the
     child agent runs with no progress callback (identical to current behavior).
     """
+    if parent_agent is None:
+        parent_agent = goal
+        goal = ""
+
     spinner = getattr(parent_agent, '_delegate_spinner', None)
     parent_cb = getattr(parent_agent, 'tool_progress_callback', None)
 
@@ -180,7 +188,7 @@ def _build_child_progress_callback(task_index: int, goal: str, parent_agent, tas
     _batch: List[str] = []
 
     def _relay(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs):
-        if not parent_cb:
+        if parent_cb is None:
             return
         try:
             parent_cb(
@@ -223,7 +231,8 @@ def _build_child_progress_callback(task_index: int, goal: str, parent_agent, tas
                     spinner.print_above(f" {prefix}├─ 💭 \"{short}\"")
                 except Exception as e:
                     logger.debug("Spinner print_above failed: %s", e)
-            _relay("subagent.thinking", preview=text)
+            # Gateway callbacks intentionally do not receive raw subagent thinking:
+            # it is too noisy and the documented behavior here is batched progress.
             return
 
         # tool.completed — no display needed here (spinner shows on started)
@@ -243,19 +252,24 @@ def _build_child_progress_callback(task_index: int, goal: str, parent_agent, tas
             except Exception as e:
                 logger.debug("Spinner print_above failed: %s", e)
 
-        if parent_cb:
-            _relay("subagent.tool", tool_name, preview, args)
+        if parent_cb is not None:
             _batch.append(tool_name or "")
             if len(_batch) >= _BATCH_SIZE:
                 summary = ", ".join(_batch)
-                _relay("subagent.progress", preview=f"🔀 {prefix}{summary}")
+                try:
+                    parent_cb("subagent_progress", f"🔀 {prefix}{summary}")
+                except Exception as e:
+                    logger.debug("Parent callback failed: %s", e)
                 _batch.clear()
 
     def _flush():
         """Flush remaining batched tool names to gateway on completion."""
-        if parent_cb and _batch:
+        if parent_cb is not None and _batch:
             summary = ", ".join(_batch)
-            _relay("subagent.progress", preview=f"🔀 {prefix}{summary}")
+            try:
+                parent_cb("subagent_progress", f"🔀 {prefix}{summary}")
+            except Exception as e:
+                logger.debug("Parent callback flush failed: %s", e)
             _batch.clear()
 
     _callback._flush = _flush

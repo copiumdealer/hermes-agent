@@ -264,6 +264,11 @@ class TestPackaging:
         assert 'bedrock = ["boto3' in content
 
     def test_bedrock_in_all_extra(self):
+        import tomllib
         from pathlib import Path
-        content = (Path(__file__).parent.parent.parent / "pyproject.toml").read_text()
-        assert '"hermes-agent[bedrock]"' in content
+
+        pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
+        optional_dependencies = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
+
+        assert "boto3>=1.35.0,<2" in optional_dependencies["all"]
+        assert all(not dep.startswith("hermes-agent[bedrock]") for dep in optional_dependencies["all"])
